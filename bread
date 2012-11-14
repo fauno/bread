@@ -1,12 +1,11 @@
 #!/bin/bash
 
-HASH_TABLE="${XDG_CONFIG_HOME:-${HOME}}/${0##*/}/feeds.tch"
-PANDOC_FLAGS="${PANDOC_FLAGS:-"--references-links --smart --normalize"}"
+BREAD_HOME="${XDG_CONFIG_HOME:-${HOME}}/${0##*/}"
+HASH_TABLE="${BREAD_HOME}/feeds.tch"
+PANDOC_FLAGS="${PANDOC_FLAGS:-"--reference-links --smart --normalize"}"
 
-if [ ! -f "$HASH_TABLE" ];
-  mkdir -p "$(dirname "$HASH_TABLE")"
-  tcamgr create "$HASH_TABLE"
-fi
+[ ! -d "$BREAD_HOME" ] && mkdir -p "$BREAD_HOME"
+[ ! -f "$HASH_TABLE" ] && tcamgr create "$HASH_TABLE"
 
 # Echoes a message on stderr
 msg() {
@@ -14,26 +13,28 @@ msg() {
 }
 
 # xml selection command
+# shortcuts some RSS extensions
 sel="xml sel -N content=http://purl.org/rss/1.0/modules/content/ \
              -N feedburner=http://rssnamespace.org/feedburner/ext/1.0 \
              -N creativeCommons=http://backend.userland.com/creativeCommonsRssModule \
+             -N atom=http://www.w3.org/2005/Atom \
              -E utf-8 -T "
 
 # Get from hash table
 get() {
-  tcamgr get ${HASH_TABLE} $1 2>/dev/null
+  tcamgr get "${HASH_TABLE}" $1 2>/dev/null
   return $?
 }
 
 # Put on hash table
 put() {
-  tcamgr put ${HASH_TABLE} $1 $2 2>/dev/null
+  tcamgr put "${HASH_TABLE}" $1 $2 2>/dev/null
   return $?
 }
 
 # Count items
 count() {
-  c=$($sel -t -v "count(/rss/channel/item)" "$1" || echo 0)
+  c=$($sel -t -v "count($2)" "$1" || echo 0)
   msg "Counting items: %d" $c
 
   echo $c
@@ -50,10 +51,43 @@ feed() {
 }
 
 # Perform cleanups
-# Currently converts HTML entities to text and removes feedburner ads
+# Currently removes feedburner ads and uses pandoc to generate markdown emails
 cleanup() {
   sed "/<div class=\"feedflare\">/,/<\/div>/d" </dev/stdin | \
   pandoc -f html -t markdown ${PANDOC_FLAGS}
+}
+
+# Answers the second big question
+# Pass $_feed as arg
+rss_or_atom() {
+  _type="$(xml el "$1" | head -n1)"
+  echo $_type
+
+  case $_type in
+    feed)
+      xml_basepath="/atom:feed"
+      xml_itempath="$xml_basepath/atom:entry"
+      xml_description="atom:subtitle"
+      xml_url="atom:link[@rel='alternate']/@href"
+      xml_title="atom:title"
+      xml_author="atom:author/atom:name"
+      xml_content="atom:content"
+      xml_summary="atom:summary"
+      xml_sel_post_by_url_prefix="$xml_itempath/atom:link[@rel='alternate'][starts-with(@href,'"
+      xml_sel_post_by_url_sufix="')]/.."
+    ;;
+    rss)
+      xml_basepath="/rss/channel"
+      xml_itempath="$xml_basepath/item"
+      xml_description="description"
+      xml_url="link"
+      xml_title="title"
+      xml_author="author"
+      xml_content="content:encoded"
+      xml_summary="description"
+      xml_sel_post_by_url_prefix="${xml_itempath}/${xml_url}[starts-with(text(),'"
+      xml_sel_post_by_url_sufix="')]/.."
+  esac
 }
 
 mkdir -p /tmp/feeds
@@ -65,12 +99,14 @@ wget --timestamping --force-directories -nv $@
 
 _feeds=($(find /tmp/feeds -type f))
 for _feed in ${_feeds[@]}; do
+  rss_or_atom "$_feed"
+
 # Get canonical link
-  _url="$($sel -t -m /rss/channel -v link "$_feed")"
+  _url="$($sel -t -m "${xml_basepath}" -v "${xml_url}" "$_feed")"
   _uri="$(echo "$_url" | feed)"
 
-  _posts=($($sel -t -m /rss/channel/item -v link -n "$_feed"))
-  _title="$($sel -t -m /rss/channel -v title -n "$_feed")"
+  _posts=($($sel -t -m "${xml_itempath}" -v "${xml_url}" -n "$_feed"))
+  _title="$($sel -t -m "${xml_basepath}" -v "${xml_title}" -n "$_feed")"
 #  _type="$(feed_type "$_feed" "$_uri")"
 
   msg "%s" "$_title"
@@ -80,14 +116,14 @@ for _feed in ${_feeds[@]}; do
   if ! get "${_uri}" >/dev/null 2>&1; then
     msg "Initializing feed..."
     {
-    $sel -t -m /rss/channel \
-         -o "Subject: " -v title -n \
+    $sel -t -m "${xml_basepath}" \
+         -o "Subject: " -v "${xml_title}" -n \
          -o "Message-Id: <$_uri@$HOSTNAME>" -n -n "$_feed" \
     && \
-    $sel -E utf-8 -T -t -m /rss/channel \
-         -o "<h1>" -v title -o "</h1>" -n \
-         -o "<p>" -v link -o "</p>" -n -n \
-         -v description -n -n \
+    $sel -t -m "${xml_basepath}" \
+         -o "<h1>" -v "${xml_title}" -o "</h1>" -n \
+         -o "<p>" -v "${xml_url}" -o "</p>" -n -n \
+         -v "${xml_description}" -n -n \
          "$_feed" | cleanup
     } | sendmail -t $USER
   fi
@@ -100,32 +136,34 @@ for _feed in ${_feeds[@]}; do
 # Remove already processed post
     if get ${_posturi} >/dev/null ; then
 
-      msg "Removing already seen: %s" "$_post"
-      xml ed -L -d "/rss/channel/item/link[starts-with(text(),'$_post')]/.." "${_feed}"
+# Only useful for summaries
+#      msg "Removing already seen: %s" "$_post"
+#      xml ed -L -d "${xml_itempath}/${xml_url}[starts-with(text(),'$_post')]/.." "${_feed}"
 
+# Only skip this post
       continue
     fi
 
-    _posturl="$($sel -t -m "/rss/channel/item/link[starts-with(text(),'$_post')]/.." \
+    _posturl="$($sel -t -m "${xml_sel_post_by_url_prefix}${_post}${xml_sel_post_by_url_sufix}" \
                      --if feedburner:origLink -v feedburner:origLink \
-                     --else -v link "$_feed")"
-    _license="$($sel -t -m "/rss/channel/item/link[starts-with(text(),'$_post')]/.." \
+                     --else -v "${xml_url}" "$_feed")"
+    _license="$($sel -t -m "${xml_sel_post_by_url_prefix}${_post}${xml_sel_post_by_url_sufix}" \
                      -v creativeCommons:license "$_feed")"
 
     msg "Sending: %s" "$_posturl"
     {
-    $sel -t -m "/rss/channel/item/link[starts-with(text(),'$_post')]/.." \
-         -o "Subject: " -v title -n \
-         -o "Message-Id: <" -v link -o ">" -n \
+    $sel -t -m "${xml_sel_post_by_url_prefix}${_post}${xml_sel_post_by_url_sufix}" \
+         -o "Subject: " -v "${xml_title}" -n \
+         -o "Message-Id: <" -v "${xml_url}" -o ">" -n \
          -o "In-Reply-To: <$_uri@$HOSTNAME>" -n -n \
          "$_feed" \
     && \
-    $sel -t -m "/rss/channel/item/link[starts-with(text(),'$_post')]/.." \
-         -o "<h1>" -v title -o "</h1>" -n \
-         -o "<p>URL: $_posturl</p>" -n -n \
-         -o "<p>License: $_license</p>" -n -n \
-         --if content:encoded -v content:encoded -n -n \
-         --else -v description -n -n \
+    $sel -t -m "${xml_sel_post_by_url_prefix}${_post}${xml_sel_post_by_url_sufix}" \
+         -o "<h1>" -v "${xml_title}" -o "</h1>" -n \
+         -o "<p>$_posturl</p>" -n -n \
+         -o "<p>$_license</p>" -n -n \
+         --if "${xml_content}" -v "${xml_content}" -n -n \
+         --else -v "${xml_summary}" -n -n \
          "${_feed}" | cleanup
     } | sendmail -t $USER
     
