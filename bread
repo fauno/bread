@@ -18,6 +18,7 @@ sel="xml sel -N content=http://purl.org/rss/1.0/modules/content/ \
              -N feedburner=http://rssnamespace.org/feedburner/ext/1.0 \
              -N creativeCommons=http://backend.userland.com/creativeCommonsRssModule \
              -N atom=http://www.w3.org/2005/Atom \
+             -N rss=http://purl.org/rss/1.0/ \
              -E utf-8 -T "
 
 # Get from hash table
@@ -68,12 +69,12 @@ rss_or_atom() {
       xml_basepath="/atom:feed"
       xml_itempath="$xml_basepath/atom:entry"
       xml_description="atom:subtitle"
-      xml_url="atom:link[@rel='alternate']/@href"
+      xml_url="atom:link[1]/@href"
       xml_title="atom:title"
       xml_author="atom:author/atom:name"
-      xml_content="atom:content"
+      xml_content="content"
       xml_summary="atom:summary"
-      xml_sel_post_by_url_prefix="$xml_itempath/atom:link[@rel='alternate'][starts-with(@href,'"
+      xml_sel_post_by_url_prefix="$xml_itempath/atom:link[1][starts-with(@href,'"
       xml_sel_post_by_url_sufix="')]/.."
     ;;
     rss)
@@ -87,6 +88,19 @@ rss_or_atom() {
       xml_summary="description"
       xml_sel_post_by_url_prefix="${xml_itempath}/${xml_url}[starts-with(text(),'"
       xml_sel_post_by_url_sufix="')]/.."
+    ;;
+    rdf:RDF)
+      xml_basepath="/rdf:RDF/rss:channel"
+      xml_itempath="$xml_basepath/../rss:item"
+      xml_description="rss:channel/rss:description"
+      xml_url="rss:link"
+      xml_title="rss:title"
+      xml_author="rss:author"
+      xml_content="content:encoded"
+      xml_summary="rss:description"
+      xml_sel_post_by_url_prefix="${xml_itempath}/${xml_url}[starts-with(text(),'"
+      xml_sel_post_by_url_sufix="')]/.."
+    ;;
   esac
 }
 
