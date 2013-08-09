@@ -2,7 +2,9 @@
 
 BREAD_HOME="${XDG_CONFIG_HOME:-${HOME}}/${0##*/}"
 HASH_TABLE="${BREAD_HOME}/feeds.tch"
-PANDOC_FLAGS="${PANDOC_FLAGS:-"--reference-links --smart --normalize"}"
+PANDOC_FLAGS="${PANDOC_FLAGS:-"--reference-links --smart --normalize --columns=72"}"
+
+export PATH=$(dirname $(realpath ${0})):$PATH
 
 [ ! -d "$BREAD_HOME" ] && mkdir -p "$BREAD_HOME"
 [ ! -f "$HASH_TABLE" ] && tcamgr create "$HASH_TABLE"
@@ -109,10 +111,20 @@ pushd /tmp/feeds >/dev/null
 
 # Download everything
 msg "Downloading %d feeds" ${#@}
-wget --timestamping --force-directories -nv $@
+if type mwget &>/dev/null ; then
+    if [ -f "$2" ]; then 
+        cat "$2" | grep "^http" | mwget 10 --force-directories --timeout=10 --tries=3 -nv
+    else
+        echo "$@" | tr " " "\n" | grep "^http" | mwget 10 --force-directories --timeout=10 --tries=3 -nv
+    fi
+else
+    wget --force-directories -nv --timeout=10 $@ --tries=3
+fi
 
 _feeds=($(find /tmp/feeds -type f))
 for _feed in ${_feeds[@]}; do
+# posts counter
+  n=0
   rss_or_atom "$_feed"
 
 # Get canonical link
@@ -126,29 +138,13 @@ for _feed in ${_feeds[@]}; do
   msg "%s" "$_title"
   msg "   %s" "$_url"
 
-# If the feed is new, initialize a new thread
-  if ! get "${_uri}" >/dev/null 2>&1; then
-    msg "Initializing feed..."
-    {
-    $sel -t -m "${xml_basepath}" \
-         -o "Subject: " -v "${xml_title}" -n \
-         -o "Message-Id: <$_uri@$HOSTNAME>" -n -n "$_feed" \
-    && \
-    $sel -t -m "${xml_basepath}" \
-         -o "<h1>" -v "${xml_title}" -o "</h1>" -n \
-         -o "<p>" -v "${xml_url}" -o "</p>" -n -n \
-         -v "${xml_description}" -n -n \
-         "$_feed" | cleanup
-    } | sendmail -t $USER
-  fi
-
 # Traverse all posts
   for _post in ${_posts[@]}; do
 
     _posturi="$(feed "${_post}")"
 
 # Remove already processed post
-    if get ${_posturi} >/dev/null ; then
+    if get "${_posturi}" >/dev/null ; then
 
 # Only useful for summaries
 #      msg "Removing already seen: %s" "$_post"
@@ -167,9 +163,12 @@ for _feed in ${_feeds[@]}; do
     msg "Sending: %s" "$_posturl"
     {
     $sel -t -m "${xml_sel_post_by_url_prefix}${_post}${xml_sel_post_by_url_sufix}" \
+         -o "From: <bread>" -n \
+         -o "To: <$USER>" -n \
+         -o "List-Id: ${_title} <$_uri>" -n \
          -o "Subject: " -v "${xml_title}" -n \
          -o "Message-Id: <" -v "${xml_url}" -o ">" -n \
-         -o "In-Reply-To: <$_uri@$HOSTNAME>" -n -n \
+         -o "In-Reply-To: <${_uri}_$(date +%Y%m%d)@$HOSTNAME>" -n -n \
          "$_feed" \
     && \
     $sel -t -m "${xml_sel_post_by_url_prefix}${_post}${xml_sel_post_by_url_sufix}" \
@@ -179,12 +178,31 @@ for _feed in ${_feeds[@]}; do
          --if "${xml_content}" -v "${xml_content}" -n -n \
          --else -v "${xml_summary}" -n -n \
          "${_feed}" | cleanup
-    } | sendmail -t $USER
+    } | sendmail -t
     
 # Store
     put "$_posturi" "$(date +%s)"
+    let n=n+1
   done
 
+  if [ $n -ne 0 ]; then
+# Send an email that's the thread with new posts
+    msg "Initializing feed..."
+    {
+    $sel -t -m "${xml_basepath}" \
+         -o "From: " -v "${xml_title}" -o " <bread>" -n \
+         -o "To: <$USER>" -n \
+         -o "List-Id: ${_title} <$_uri>" -n \
+         -o "Subject: " -v "${xml_title}" -n \
+         -o "Message-Id: <${_uri}_$(date +%Y%m%d)@$HOSTNAME>" -n -n "$_feed" \
+    && \
+    $sel -t -m "${xml_basepath}" \
+         -o "<h1>" -v "${xml_title}" -o "</h1>" -n \
+         -o "<p>" -v "${xml_url}" -o "</p>" -n -n \
+         -v "${xml_description}" -n -n \
+         "$_feed" | cleanup
+    } | sendmail -t
+  fi
 
 # Store and/or initialize
   put "$_uri" "$(date +%s)"
