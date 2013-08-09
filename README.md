@@ -7,4 +7,4 @@ I don't even remember why I choose it's name...
 
 ## Requirements
 
-tokyocabinet, xmlstarlet
+tokyocabinet, xmlstarlet, pandoc
