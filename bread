@@ -2,7 +2,7 @@
 
 BREAD_HOME="${XDG_CONFIG_HOME:-${HOME}}/${0##*/}"
 HASH_TABLE="${BREAD_HOME}/feeds.tch"
-PANDOC_FLAGS="${PANDOC_FLAGS:-"--reference-links --smart --normalize --columns=72"}"
+PANDOC_FLAGS="${PANDOC_FLAGS:-"--reference-links --normalize --columns=72"}"
 
 export PATH=$(dirname $(realpath ${0})):$PATH
 
