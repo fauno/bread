@@ -54,9 +54,11 @@ feed() {
 }
 
 # Perform cleanups
-# Currently removes feedburner ads and uses pandoc to generate markdown emails
+# Currently removes feedburner ads, trackin params and uses pandoc to
+# generate markdown emails
 cleanup() {
-  sed "/<div class=\"feedflare\">/,/<\/div>/d" </dev/stdin | \
+  sed -e "/<div class=\"feedflare\">/,/<\/div>/d" \
+      -e "s/utm_[^\&]\+//g" | \
   pandoc -f html -t markdown ${PANDOC_FLAGS}
 }
 
