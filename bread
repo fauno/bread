@@ -48,8 +48,15 @@ count() {
 # Returns feed name from url
 # accepts pipe and $1
 feed() {
-  if [ -z "$1" ] ; then 
-    sed "s/[^a-z0-9]//g" </dev/stdin
+  if [ -z "$1" ] ; then
+# TODO there's a more elegant way to do this
+    while read u; do
+      if echo "$u" | grep -q feedburner; then
+        echo "$u.feedburner.com" | cut -d/ -f4
+      else
+        echo "$u" | cut -d/ -f3 | sed "s/^\(www\|blog\|static\)\.//"
+      fi
+    done
   else
     echo "$1" | feed
   fi
