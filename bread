@@ -1,8 +1,10 @@
 #!/bin/bash
 
+export PATH=~/Proyectos/sendmail:$PATH
+
 BREAD_HOME="${XDG_CONFIG_HOME:-${HOME}}/${0##*/}"
 HASH_TABLE="${BREAD_HOME}/feeds.tch"
-PANDOC_FLAGS="${PANDOC_FLAGS:-"--reference-links --normalize --columns=72"}"
+PANDOC_FLAGS="${PANDOC_FLAGS:-"--normalize --columns=72"}"
 
 export PATH=$(dirname $(realpath ${0})):$PATH
 
@@ -59,7 +61,7 @@ feed() {
 cleanup() {
   sed -e "/<div class=\"feedflare\">/,/<\/div>/d" \
       -e "s/utm_[^\&]\+//g" | \
-  pandoc -f html -t markdown ${PANDOC_FLAGS}
+  pandoc -f html -t markdown_strict ${PANDOC_FLAGS}
 }
 
 # Answers the second big question
@@ -75,6 +77,7 @@ rss_or_atom() {
       xml_description="atom:subtitle"
       xml_url="atom:link[1]/@href"
       xml_title="atom:title"
+      xml_date="atom:pubDate"
       xml_author="atom:author/atom:name"
       xml_content="content"
       xml_summary="atom:summary"
@@ -88,6 +91,7 @@ rss_or_atom() {
       xml_url="link"
       xml_title="title"
       xml_author="author"
+      xml_date="updated"
       xml_content="content:encoded"
       xml_summary="description"
       xml_sel_post_by_url_prefix="${xml_itempath}/${xml_url}[starts-with(text(),'"
@@ -97,6 +101,7 @@ rss_or_atom() {
       xml_basepath="/rdf:RDF/rss:channel"
       xml_itempath="$xml_basepath/../rss:item"
       xml_description="rss:channel/rss:description"
+      xml_date="rss:updated"
       xml_url="rss:link"
       xml_title="rss:title"
       xml_author="rss:author"
@@ -169,7 +174,7 @@ for _feed in ${_feeds[@]}; do
          -o "To: <$USER>" -n \
          -o "List-Id: ${_title} <$_uri>" -n \
          -o "Subject: " -v "${xml_title}" -n \
-         -o "Message-Id: <" -v "${xml_url}" -o ">" -n \
+         -o "Message-Id: <" -v "${xml_url}" -o "_$(date +%Y%m%d%h%M%s)>" -n \
          -o "In-Reply-To: <${_uri}_$(date +%Y%m%d)@$HOSTNAME>" -n -n \
          "$_feed" \
     && \
